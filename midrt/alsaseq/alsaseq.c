@@ -248,7 +248,12 @@ alsaseq_output(PyObject *self, PyObject *args)
         case SND_SEQ_EVENT_NOTEON:
         case SND_SEQ_EVENT_NOTEOFF:
         case SND_SEQ_EVENT_KEYPRESS:
-            if (!PyArg_ParseTuple( data, "bbbbi;data parameter should have 5 values", &ev.data.note.channel, &ev.data.note.note, &ev.data.note.velocity, &ev.data.note.off_velocity, &ev.data.note.duration))
+            if (!PyArg_ParseTuple( data, "bbbbi;data parameter should have 5 values",
+                   &ev.data.note.channel,
+                   &ev.data.note.note,
+                   &ev.data.note.velocity,
+                   &ev.data.note.off_velocity,
+                   &ev.data.note.duration))
             return NULL;
             break;
 
@@ -256,7 +261,13 @@ alsaseq_output(PyObject *self, PyObject *args)
         case SND_SEQ_EVENT_PGMCHANGE:
         case SND_SEQ_EVENT_CHANPRESS:
         case SND_SEQ_EVENT_PITCHBEND:
-            if (!PyArg_ParseTuple( data, "bbbbii;data parameter should have 6 values", &ev.data.control.channel, &ev.data.control.unused[0], &ev.data.control.unused[1], &ev.data.control.unused[2], &ev.data.control.param, &ev.data.control.value ))
+            if (!PyArg_ParseTuple( data, "bbbbii;data parameter should have 6 values",
+                   &ev.data.control.channel,
+                   &ev.data.control.unused[0],
+                   &ev.data.control.unused[1],
+                   &ev.data.control.unused[2],
+                   &ev.data.control.param,
+                   &ev.data.control.value ))
             return NULL;
             break;
         }

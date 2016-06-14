@@ -166,10 +166,10 @@ def ourAlsaOut(alsa_midi_io):
         if verbose & 4:
             print('Found a Midi Monitor to connect as output')
         return 1 # yes
-    if a.client_name.find('Through') >=0:
-        if verbose & 4:
-            print('Found a Midi Through to connect as output')
-        return 1 # yes
+    #if a.client_name.find('Through Port-0') >=0:
+    #    if verbose & 4:
+    #        print('Found a Midi Through to connect as output')
+    #    return 1 # yes
     if a.client_name.find('fluidSynth') >=0: # guess
         if verbose & 4:
             print('Found FluidSynth to connect as output')
@@ -434,6 +434,9 @@ class MidiDevice:
     #-------------------------------------------
     def WriteAlsaEvent(self, event):
         ''' write raw alsa event '''
+        # swap out and send on our selected channel
+        #event[7][0] = (event[7][0] & 0xf0) | self.mChannel
+        #nope, it's a tuple... can't modify
         alsaseq.output(event)
 
     #-------------------------------------------
@@ -564,6 +567,7 @@ class Main:
                                  # for controls under certain conditions
 
         self.virtual_pitchval = 0 # +- our virtual pitchwheel value
+        self.key_select = -1 # last bank/prog select from list
 
         self.cmdargs = ''
         self.options = '' # -oSTRING
@@ -628,13 +632,42 @@ class Main:
         k = g.mKeys
         if self.verbose & 2:
             print('pressed:%s' % (c))
+        if self.yoshiBank == None:
+            self.readYoshiBankInfo()
         if c == '?':
-            print('''   MENU
-      c - switch channels
-      l - list midi devices
-      b - yoshi bank/prog selector
-    ''')
+            self.MidimanToYoshiRouter_ShowMenuHelp()
+        elif c == 'a':
+            # show bank/prog selection
+            self.yoshiBank.PrintChanSettings()
+        elif c == 'b':
+            self.yoshiBank.PrintBankSelection()
+            s = k.our_input('Select a bank:')
+            if s:
+                num = yoshibanks.GetNum(s)
+                if num >= 0:
+                    num = int(s)
+                    self.yoshiBank.setBank(num)
+        elif c == 'c':
+            s = k.our_input('Select a channel(1-16):')
+            if s:
+                num = yoshibanks.GetNum(s)
+                self.mChannel = num-1 # use zero indexing for channel
+                self.yoshiBank.mChannel = self.mChannel
+                pr('change to channel:%d' % (self.mChannel+1))
+        elif c >= 'd' and c <= 'e':
+            # select next/prev bank/prog from list
+            if c == 'd':
+               self.key_select -= 1
+               if self.key_select < 0:
+                 self.key_select = 11
+            else:
+               self.key_select += 1
+               if self.key_select > 11:
+                 self.key_select = 0
+            self.ProgBankListSelect(self.key_select)
+            self.yoshiBank.PrintChanSettings() # show bank/prog selection
         elif c == 'l':
+            # list alsa midi ins/outs
             if self.verbose & 2:
                 print('******* aconnect -i INPUTS:')
                 os.system('aconnect -i')
@@ -649,29 +682,8 @@ class Main:
             #print(lst)
             for (client_id, port_id, client_name, port_name) in lst:
                 print('client %3d %-26s port %d %s' % (client_id,client_name, port_id,port_name))
-        elif c == 'z':
-            self.readYoshiBankInfo()
-            self.yoshiBank.mChannel = self.mChannel # set, this is set to last event channel seen
-            k.kb_cooked()
-            self.yoshiBank.bankBrowser()
-            k.kb_raw()
-        elif c == 'a':
-            self.readYoshiBankInfo()
-            self.yoshiBank.mChannel = self.mChannel # set, this is set to last event channel seen
-            self.yoshiBank.PrintChanSettings()
-        elif c == 'b':
-            self.readYoshiBankInfo()
-            self.yoshiBank.mChannel = self.mChannel # set, this is set to last event channel seen
-            self.yoshiBank.PrintBankSelection()
-            s = k.our_input('Select a bank:')
-            if s:
-                num = yoshibanks.GetNum(s)
-                if num >= 0:
-                    num = int(s)
-                    self.yoshiBank.setBank(num)
         elif c == 'p':
             self.readYoshiBankInfo()
-            self.yoshiBank.mChannel = self.mChannel # set, this is set to last event channel seen
             self.yoshiBank.PrintProgSelection()
             s = k.our_input('Select a program:')
             if s:
@@ -685,6 +697,7 @@ class Main:
             if num == 0:
                 num = 10 # typically drums are channel 10
             self.mChannel = num-1 # use zero indexing for channel
+            self.yoshiBank.mChannel = self.mChannel
             pr('change to channel:%d' % (self.mChannel+1))
         elif c == 'd':
             s = k.our_input('Enter a num:')
@@ -706,9 +719,27 @@ class Main:
             time.sleep(duration) # quick and simple, play note for 1 second
             pkt[2] = 0 # velocity, note-off when 0
             self.mDev.Write(pkt)
-        elif c >= 'd' and c <= 'g':
-            prog_sel = ord(c) - ord('d')
+        elif c == 'z':
+            # this is going away, for newer state-machine method(b,p)
+            self.readYoshiBankInfo()
+            self.yoshiBank.mChannel = self.mChannel # set, this is set to last event channel seen
+            k.kb_cooked()
+            self.yoshiBank.bankBrowser()
+            k.kb_raw()
 
+
+    #---------------------------------------------------
+    def MidimanToYoshiRouter_ShowMenuHelp(self):
+        print('''ESC to exit.
+a - print current channel bank/prog selection
+b - see/set yoshi bank
+c - see/set channel
+l - list midi ins/outs
+p - see/set yoshi program
+0 to 9 - set channel(where 0 is 10)
+A to Z - caps, use as cheap virtual keyboard(play a note)
+l - list midi devices
+''')
 
     #---------------------------------------------------
     # Router - Map incoming MidiMan knobs to Yoshi controls
@@ -726,15 +757,7 @@ class Main:
             print('  Acting as Pass Thru router, passing thru notes, etc')
         else:
             print('  Acting as Non-Pass thru device, no pass thru of notes, etc')
-
-        print('''ESC to exit.
-a - print current channel bank/prog selection
-b - see/set current channel yoshi bank
-p - see/set current channel yoshi program
-0 to 9 - set channel(where 0 is 10)
-A to Z - caps, use as cheap virtual keyboard(play a note)
-l - list midi devices
-''')
+        self.MidimanToYoshiRouter_ShowMenuHelp()
 
     #---------------------------------------------------
     def MidimanToYoshiRouter_Loop(self):
@@ -781,11 +804,12 @@ l - list midi devices
         self.mDev.Write([0xb0 | tx_ch, 38, cc_data])
 
     #---------------------------------------------------
-    def PitchKeyControl(self, key_select):
+    def ProgBankListSelect(self, key_select):
         ' set bank,program based on synth keybd key press when pitch > 120 '
         bn,bs,pn,ps = self.prog_table[key_select]
         self.readYoshiBankInfo()
         self.yoshiBank.mChannel = self.mChannel
+        pr('switch to %d %d.%s %d.%s' % (key_select, bn,bs, pn,ps))
         self.yoshiBank.sendBankProgSelect(self.mChannel, bn, pn)
 
     #---------------------------------------------------
@@ -811,12 +835,13 @@ l - list midi devices
         m_b3 = pkt[4]
 
         rx_ch = m_b0 & 0xf        # The channel in lower first nibble
-        self.mChannel = rx_ch     # use this, the last channel seen
-        if ch != rx_ch:
-            if self.verbose & 2:
-                print('switch to ch:%d' % (rx_ch))
+        #self.mChannel = rx_ch     # use this, the last channel seen
+        #if ch != rx_ch:
+        #    if self.verbose & 2:
+        #        print('switch to ch:%d' % (rx_ch))
+        #tx_ch = rx_ch # let's send on same channel as input event
+        tx_ch = ch # let's send on channel we select
 
-        tx_ch = rx_ch # let's send on same channel as input event
         if (m_b0 & 0xf0) == 0xb0: # CC control message upper nibble
             # we have 8 knobs.  On my Oxygen or Radium.
             # I have them mapped to CC-70,71,..,77
@@ -918,6 +943,7 @@ l - list midi devices
         elif (m_b0 & 0xf0) == 0x90:
             if self.verbose & 2:
                 print('ch:%d NoteOff:%d Vel:%d' % (rx_ch, m_b1, m_b2))
+            self.mDev.Write([0x90 | tx_ch, m_b1, m_b2])
         elif (m_b0 & 0xf0) == 0x80:
             if self.verbose & 2:
                 print('ch:%d NoteOn:%d Vel:%d' % (rx_ch, m_b1, m_b2))
@@ -926,8 +952,8 @@ l - list midi devices
                 if self.last_modwheel > 100:
                 # using top of modwheel to set program(12 choices)
                     if m_b2 != 0: # velocity: off (only do when key on)
-                        key_select = m_b1 % 12 # C-B, 12 choices, any octave
-                        self.PitchKeyControl(key_select)
+                        self.key_select = m_b1 % 12 # C-B, 12 choices, any octave
+                        self.ProgBankListSelect(self.key_select)
                     if self.verbose & 2:
                         pr('Filter Prog Key')
                     return True # processed, don't pass thru, filter
@@ -936,10 +962,11 @@ l - list midi devices
                 if self.virtual_pitchval != 0:
                     self.virtual_pitchval = 0 # reset it and send out
                     ev = alsamidi.pitchbendevent(tx_ch, self.virtual_pitchval)
-                    fixed_ev = (13,0,0,253, (0,0), (28,0), (130,0), (0,0,0, 0,0,0))
+                    #fixed_ev = (13,0,0,253, (0,0), (28,0), (130,0), (0,0,0, 0,0,0))
                     ev = fixed_ev
                     #self.mDev.Write(ev) # send out as pitch wheel control
-                    alsaseq.output(ev)
+                    self.mDev.WriteAlsaEvent(ev)
+                    #alsaseq.output(ev)
                     # put out a pitch wheel change based on mod wheel change
                     if self.verbose & 2:
                         pr('RESET Filter Mod-Wheel %d, to pitch %d bend' % (self.last_modwheel, self.virtual_pitchval))
@@ -947,8 +974,10 @@ l - list midi devices
             if self.pass_thru:
                 if self.verbose & 2:
                     print('pass thru noteon')
-                #ev = alsamidi.noteonevent(rx_ch, m_b1, m_b2)
-                self.mDev.WriteAlsaEvent(alsa_event)
+                #ev = alsamidi.noteonevent(tx_ch, m_b1, m_b2)
+                #alsa_event[7][0] = 0x80 | tx_ch
+                #self.mDev.WriteAlsaEvent(alsa_event)
+                self.mDev.Write([0x80 | tx_ch, m_b1, m_b2])
         else:
             if self.verbose & 1:
                 print('Unhandled event ch:%d Cmd:%d Vel:%d' % (rx_ch, m_b1, m_b2))
@@ -956,6 +985,7 @@ l - list midi devices
                 if self.verbose & 2:
                     print('pass thru event')
                 self.mDev.WriteAlsaEvent(alsa_event)
+                #self.mDev.Write([0x80 | tx_ch, m_b1, m_b2])
         return True # processed something
 
     #---------------------------------------------------
@@ -1014,6 +1044,8 @@ def main():
     if mo.options.find('runyosh') >= 0:
         # yosh -c no cmdline, -C cmdline, -i no gui, -I gui.
         #   -S load state, -K auto connect to jack
+        # This is not working, must be a simple way to daemonize it..
+        # should see if it is already running..
         subprocess.Popen(["yoshimi", "-K", "-S", "-I", "-c"])
         #run('yoshimi -K -S -I -c &')
         #os.system('yoshimi -K -S')

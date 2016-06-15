@@ -43,6 +43,13 @@ snd_seq_t *seq_handle;
 int queue_id, ninputports, noutputports, createqueue;
 int firstoutputport, lastoutputport;
 
+// copy of rx events, for modifications.
+// it's about 32 bytes roughly..
+// So our python can send the last rx'ed packet with
+// just slight modifications, without the whole event getting passed
+// to and from.
+snd_seq_event_t rx_events[2];  // only use first now.
+
 //-------------------------------------------------
 static PyObject *
 alsaseq_client(PyObject *self /* Not used */, PyObject *args)
@@ -288,6 +295,62 @@ alsaseq_output(PyObject *self, PyObject *args)
 }
 
 //-------------------------------------------------
+static char alsaseq_outlast__doc__[] =
+"outlast( (b0,b1,b2,b3) ) --> None.\n\n"
+"Send last rx event to output port, scheduled if a queue exists,\n"
+"Allow modification of some basic MIDI parameters,\n"
+" b0 is  tx_channel(0-15) | (mod_cnt << 4) ; tx_channel ignored if mod_cnt < 1\n"
+" b1 is  data[0] (note) if mod_cnt >= 2\n"
+" b2 is  data[1] (velocity) if mod_cnt >= 3\n"
+" b3 is  data[2] if mod_cnt >= 4\n"
+"immediately if no queue was created in the client.\n\n";
+static PyObject *
+alsaseq_outlast(PyObject *self, PyObject *args)
+{
+  snd_seq_event_t *ev = &rx_events[0]; // ptr to last one rx
+  //static PyObject * data;
+  static unsigned char bdata[4];
+
+        // quick and dirty allow a few modification parameters.        
+        if (!PyArg_ParseTuple(args, "(bbbb)",
+               &bdata[0], &bdata[1], &bdata[2], &bdata[3] ))
+           return NULL;
+        switch (bdata[0] >> 4) {
+            case 4:
+                ev->data.control.unused[2] = bdata[3];
+            case 3:
+                ev->data.control.unused[1] = bdata[2];
+            case 2:
+                ev->data.control.unused[0] = bdata[1];
+            case 1:
+                ev->data.control.channel = bdata[0] & 0x0f;
+            break;
+            default:
+            case 0:
+                // no modification
+            break;
+        }
+
+        /* If not a direct event, use the queue */
+        if ( ev->queue != SND_SEQ_QUEUE_DIRECT )
+            ev->queue = queue_id;
+        /* Modify source port if out of bounds */
+        if ( ev->source.port < firstoutputport ) 
+           snd_seq_ev_set_source(ev, firstoutputport );
+        else if ( ev->source.port > lastoutputport )
+           snd_seq_ev_set_source(ev, lastoutputport );
+        /* Use subscribed ports, except if ECHO event */
+        if ( ev->type != SND_SEQ_EVENT_ECHO ) snd_seq_ev_set_subs(ev);
+        // kb - above sets dest.client(SUBSCRIBERS), .port to UNKNOWN..
+        // not sure if that is needed, maybe it's already set on rx.
+
+        snd_seq_event_output_direct( seq_handle, ev ); // send it.
+
+	Py_INCREF(Py_None);
+	return Py_None;
+}
+
+//-------------------------------------------------
 static char alsaseq_id__doc__[] =
 "id() --> number.\n\nReturn the client number.  0 if client not created yet."
 ;
@@ -387,18 +450,101 @@ alsaseq_input(PyObject *self, PyObject *args)
         case SND_SEQ_EVENT_NOTEON:
         case SND_SEQ_EVENT_NOTEOFF:
         case SND_SEQ_EVENT_KEYPRESS:
-            return Py_BuildValue( "(bbbb(ii)(bb)(bb)(bbbbi))", ev->type, ev->flags, ev->tag, ev->queue, ev->time.time.tv_sec, ev->time.time.tv_nsec, ev->source.client, ev->source.port, ev->dest.client, ev->dest.port, ev->data.note.channel, ev->data.note.note, ev->data.note.velocity, ev->data.note.off_velocity, ev->data.note.duration );
+            rx_events[0] = *ev; // make copy, it's about 32 bytes roughly..
+            return Py_BuildValue( "(bbbb(ii)(bb)(bb)(bbbbi))",
+                  ev->type, ev->flags, ev->tag, ev->queue,
+                  ev->time.time.tv_sec, ev->time.time.tv_nsec,
+                  ev->source.client, ev->source.port,
+                  ev->dest.client, ev->dest.port,
+                  ev->data.note.channel, ev->data.note.note,
+                  ev->data.note.velocity,
+                  ev->data.note.off_velocity,
+                  ev->data.note.duration );
             break;
 
         case SND_SEQ_EVENT_CONTROLLER:
         case SND_SEQ_EVENT_PGMCHANGE:
         case SND_SEQ_EVENT_CHANPRESS:
         case SND_SEQ_EVENT_PITCHBEND:
-            return Py_BuildValue( "(bbbb(ii)(bb)(bb)(bbbbii))", ev->type, ev->flags, ev->tag, ev->queue, ev->time.time.tv_sec, ev->time.time.tv_nsec, ev->source.client, ev->source.port, ev->dest.client, ev->dest.port, ev->data.control.channel, ev->data.control.unused[0], ev->data.control.unused[1], ev->data.control.unused[2], ev->data.control.param, ev->data.control.value );
+            rx_events[0] = *ev; // make copy, it's about 32 bytes roughly..
+            return Py_BuildValue( "(bbbb(ii)(bb)(bb)(bbbbii))",
+                  ev->type, ev->flags, ev->tag, ev->queue,
+                  ev->time.time.tv_sec, ev->time.time.tv_nsec,
+                  ev->source.client, ev->source.port,
+                  ev->dest.client, ev->dest.port,
+                  ev->data.control.channel, ev->data.control.unused[0],
+                  ev->data.control.unused[1],
+                  ev->data.control.unused[2],
+                  ev->data.control.param,
+                  ev->data.control.value );
             break;
 
         default:
-            return Py_BuildValue( "(bbbb(ii)(bb)(bb)(bbbbi))", ev->type, ev->flags, ev->tag, ev->queue, ev->time.time.tv_sec, ev->time.time.tv_nsec, ev->source.client, ev->source.port, ev->dest.client, ev->dest.port, ev->data.note.channel, ev->data.note.note, ev->data.note.velocity, ev->data.note.off_velocity, ev->data.note.duration );
+            rx_events[0] = *ev; // make copy, it's about 32 bytes roughly..
+            return Py_BuildValue( "(bbbb(ii)(bb)(bb)(bbbbi))",
+                  ev->type, ev->flags, ev->tag, ev->queue,
+                  ev->time.time.tv_sec, ev->time.time.tv_nsec,
+                  ev->source.client, ev->source.port,
+                  ev->dest.client, ev->dest.port,
+                  ev->data.note.channel, ev->data.note.note,
+                  ev->data.note.velocity,
+                  ev->data.note.off_velocity,
+                  ev->data.note.duration );
+        }
+
+}
+
+//-------------------------------------------------
+static char alsaseq_inmidi__doc__[] =
+"input() --> event.\n\nWait for an ALSA event in any of the input ports and return it.\n\n"
+" ALSA events are returned as a tuple with 4 elements:\n"
+"    b0,b1,i3,i4 - type, channel, midi_data)...\n"
+"    where midi_data(i3,i4) are - note, velocity for NOTE type.\n"
+"      (i3,i4) are - param, value for CTRL type.\n\n";
+
+static PyObject *
+alsaseq_inmidi(PyObject *self, PyObject *args)
+{
+  snd_seq_event_t *ev;
+  // this is a stripped down version of input() above, just info I need.
+  // might be useful to return client src,dest info, but for now leave out.
+        
+        if (!PyArg_ParseTuple(args, "" ))
+            return NULL;
+        snd_seq_event_input( seq_handle, &ev );
+
+        switch( ev->type ) {
+        case SND_SEQ_EVENT_NOTE:
+        case SND_SEQ_EVENT_NOTEON:
+        case SND_SEQ_EVENT_NOTEOFF:
+        case SND_SEQ_EVENT_KEYPRESS:
+            rx_events[0] = *ev; // make copy
+            return Py_BuildValue( "(bbii)",
+                  ev->type,
+                  ev->data.note.channel,
+                  ev->data.note.note,
+                  ev->data.note.velocity);
+            break;
+
+        case SND_SEQ_EVENT_CONTROLLER:
+        case SND_SEQ_EVENT_PGMCHANGE:
+        case SND_SEQ_EVENT_CHANPRESS:
+        case SND_SEQ_EVENT_PITCHBEND:
+            rx_events[0] = *ev; // make copy, it's about 32 bytes roughly..
+            return Py_BuildValue( "(bbii)",
+                  ev->type,
+                  ev->data.note.channel,
+                  ev->data.control.param,
+                  ev->data.control.value );
+            break;
+
+        default:
+            rx_events[0] = *ev; // make copy, it's about 32 bytes roughly..
+            return Py_BuildValue( "(bbii)",
+                  ev->type,
+                  ev->data.note.channel,
+                  ev->data.control.param,
+                  ev->data.control.value );
         }
 
 }
@@ -463,12 +609,14 @@ static struct PyMethodDef alsaseq_methods[] = {
  {"stop",	(PyCFunction)alsaseq_stop,	METH_VARARGS,	alsaseq_stop__doc__},
  {"status",	(PyCFunction)alsaseq_status,	METH_VARARGS,	alsaseq_status__doc__},
  {"output",	(PyCFunction)alsaseq_output,	METH_VARARGS,	alsaseq_output__doc__},
+ {"outlast",	(PyCFunction)alsaseq_outlast,	METH_VARARGS,	alsaseq_outlast__doc__},
  {"syncoutput",	(PyCFunction)alsaseq_syncoutput,	METH_VARARGS,	alsaseq_syncoutput__doc__},
  {"connectto",	(PyCFunction)alsaseq_connectto,	METH_VARARGS,	alsaseq_connectto__doc__},
  {"connectfrom",	(PyCFunction)alsaseq_connectfrom,	METH_VARARGS,	alsaseq_connectfrom__doc__},
  {"inputpending",	(PyCFunction)alsaseq_inputpending,	METH_VARARGS,	alsaseq_inputpending__doc__},
  {"id",	(PyCFunction)alsaseq_id,	METH_VARARGS,	alsaseq_id__doc__},
  {"input",	(PyCFunction)alsaseq_input,	METH_VARARGS,	alsaseq_input__doc__},
+ {"inmidi",	(PyCFunction)alsaseq_inmidi,	METH_VARARGS,	alsaseq_inmidi__doc__},
  {"fd",	(PyCFunction)alsaseq_fd,	METH_VARARGS,	alsaseq_fd__doc__},
  {"list",	(PyCFunction)alsaseq_list,	METH_VARARGS,	alsaseq_list__doc__},
  

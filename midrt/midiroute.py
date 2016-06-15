@@ -372,7 +372,6 @@ class MidiDevice:
         # read the alsa event
         ev = alsaseq.input()
         (mtype, flags, tag, queue, m_time, src, dest, mdata) = ev
-        #    alsaseq.input()
 
         if mtype == alsaseq.SND_SEQ_EVENT_SENSING: #42: # tick?  get about 3 per second
             return None # ignore for now, filter these out quitely.
@@ -429,6 +428,54 @@ class MidiDevice:
             if self.verbose & 2:
                 print('  mtype:%x flags:%x tag:%x queue:%x m_time:%s src:%s dest:%s mdata:%s' % \
                   (mtype, flags, tag, queue, str(m_time), str(src), str(dest), str(mdata)))
+        return None
+
+    #-------------------------------------------
+    # Read a single alsa event, reconstruct to MIDI where approriate
+    def ReadMidi(self):
+
+        # read the alsa event
+        ev = alsaseq.inmidi()
+        (mtype, rx_ch, note_param, vel_ctrl) = ev
+
+        if mtype == alsaseq.SND_SEQ_EVENT_SENSING: #42: # tick?  get about 3 per second
+            return None # ignore for now, filter these out quitely.
+
+        #b0 = mdata[0] # 0, ch? mtype=6
+        #b1 = mdata[1] # note
+        #b2 = mdata[2] # velocity
+        #b3 = mdata[3] # 0
+        if self.verbose & 4:
+            print(mtype, rx_ch, note_param, vel_ctrl)
+            # need to debug,understand, print it.
+        # there is just a NOTE ev, why?  would I see this ever?
+        if mtype == alsaseq.SND_SEQ_EVENT_NOTEON: #6:
+            if self.verbose & 2:
+                print('ch:%d noteon:%d vel:%d' % (rx_ch, note_param, vel_ctrl))
+            return (rx_ch | 0x80, note_param, vel_ctrl)
+        elif mtype == alsaseq.SND_SEQ_EVENT_NOTEOFF: #7:
+            if self.verbose & 2:
+                print('UNEXPECTED: ch:%d noteoff:%d vel:%d' % (rx_ch, note_param, vel_ctrl))
+            return (rx_ch | 0x90, note_param, vel_ctrl)
+        elif mtype == alsaseq.SND_SEQ_EVENT_CONTROLLER: #10:
+            if self.verbose & 2:
+                print('ch:%d cc:%d val:%d' % (rx_ch, note_param, vel_ctrl))
+            return (rx_ch | 0xb0, note_param, vel_ctrl)
+        elif mtype == alsaseq.SND_SEQ_EVENT_PGMCHANGE: #?:
+            if self.verbose & 2:
+                print('ch:%d progchg:%d val:%d' % (rx_ch, note_param, vel_ctrl))
+            return (rx_ch | 0xc0, note_param, vel_ctrl)
+
+        elif mtype == alsaseq.SND_SEQ_EVENT_PITCHBEND: # 13:
+            if self.verbose & 2:
+                print('ch:%d pitch_chg:%d val:%d' % (rx_ch, note_param, vel_ctrl))
+            return (rx_ch | 0xe0, note_param, vel_ctrl)
+        else:
+            if self.verbose & 2:
+                print('Unhandled alsaseq pkt type:%d' % (mtype))
+            if self.verbose & 2:
+                print('ch:%d note_param:%d val:%d' % (rx_ch, note_param, vel_ctrl))
+            return (rx_ch | 0xf0, note_param, vel_ctrl)
         return None
 
     #-------------------------------------------
@@ -549,7 +596,10 @@ class MidiDevice:
 
     #-------------------------------------------
     def Poll(self):
+        ' returns True if input event pending, otherwise False if nothing '
         return alsaseq.inputpending()
+        # future: returns true on note on's or ctrl msgs we care about
+        #return alsaseq.in_note_ctrl()
 
 #-------------------------------------------
 #-------------------------------------------
@@ -599,23 +649,6 @@ class Main:
           (115, "chip", 39, "iBrazz_2"),
           (115, "chip", 44, "ChipBass"),
           )
-
-        self.prog_list = (
-          'Plucked 3', # 65 Plucked, 3
-          'Synth Brazz 2',   # 15 Brass, 4
-          'Plucked 1', # 65 Plucked, 1
-          'Bottle', # 105 Will GC, 101
-          'Plucked 4', # 65 Plucked 4
-          'Hard Rhodes1', # 75 Rhodes. 42
-
-          'Sequence1', # 5. Arp
-          'Sequence2', # 4. Arp
-          'Organ Choir Pad1', # 30 Dual 7
-          'Brazz 2',  # 15. brass, 39 ????
-          'Wide Bass', # 110 Will GC, 56
-          'Hyper Matrix' # 105 Will GC, 126
-          )
-            #'Brazz 2',  # 115. chip, 39
 
     #---------------------------------------------------
     def readYoshiBankInfo(self):
@@ -815,32 +848,36 @@ l - list midi devices
     #---------------------------------------------------
     def MidimanToYoshiRouter_Poll(self):
         ' Router, worker, poll often, so we do not have to use threads ;)'
-        ch = self.mChannel # send channel
 
         if not self.mDev.Poll():
-            return False # nothing processed
+            return False # no midi events, nothing processed
 
         #print('got a midi event!')
-        pkt = self.mDev.Read() # read only 1 message at a time
-        if pkt == None:
+        if 1:
+          pkt = self.mDev.ReadMidi() # read only 1 message at a time
+          if pkt == None:
+            # ignore bogus(alsaseq giving 3 odd pkts per sec)
+            return True # processed something
+          m_b0 = pkt[0] # rx_ch | midi_ctrl
+          m_b1 = pkt[1] # note or param
+          m_b2 = pkt[2] # velocity or value
+          #m_b3 = pkt[3]
+        else:
+          pkt = self.mDev.Read() # read only 1 message at a time
+          if pkt == None:
             # ignore bogus(alsaseq giving 3 odd pkts per sec)
             return True # processed something
 
-        #print('got a midi event!')
-        alsa_event = pkt[0]
-        #m_time = alsa_event[4]
-        m_b0 = pkt[1]
-        m_b1 = pkt[2]
-        m_b2 = pkt[3]
-        m_b3 = pkt[4]
+          #print('got a midi event!')
+          alsa_event = pkt[0]
+          #m_time = alsa_event[4]
+          m_b0 = pkt[1]
+          m_b1 = pkt[2]
+          m_b2 = pkt[3]
+          m_b3 = pkt[4]
 
         rx_ch = m_b0 & 0xf        # The channel in lower first nibble
-        #self.mChannel = rx_ch     # use this, the last channel seen
-        #if ch != rx_ch:
-        #    if self.verbose & 2:
-        #        print('switch to ch:%d' % (rx_ch))
-        #tx_ch = rx_ch # let's send on same channel as input event
-        tx_ch = ch # let's send on channel we select
+        tx_ch = self.mChannel # send channel, send on channel we select
 
         if (m_b0 & 0xf0) == 0xb0: # CC control message upper nibble
             # we have 8 knobs.  On my Oxygen or Radium.
@@ -882,7 +919,7 @@ l - list midi devices
             elif m_b1 == 76:
                 if self.verbose & 1:
                     map_desc = 'master Yoshi-Portamento CC-65= %d' % (m_b2)
-                # This seems digital, > 64 is on, less off
+                # This is digital on/off, > 64 is on, less off
                 self.mDev.Write([0xb0 | tx_ch, 65, m_b2]) # route to CC-65 Yoshi portamento
                 if self.verbose & 1:
                     print('map CC-%d %d to: ' % (m_b1, m_b2) + map_desc)
@@ -892,7 +929,7 @@ l - list midi devices
                 #mOut.Write([0xb0 | tx_ch, 11, m_b2]) # route to CC-11 Yoshi portamento
                 if self.verbose & 1:
                     map_desc = 'master Yoshi-Sustain CC-64= %d' % (m_b2)
-                self.mDev.Write([0xb0 | tx_ch, 64, m_b2]) # route to CC-11 Yoshi portamento
+                self.mDev.Write([0xb0 | tx_ch, 64, m_b2]) # route to CC-11 Yoshi sustain?
                 if self.verbose & 1:
                     print('map CC-%d %d to: ' % (m_b1, m_b2) + map_desc)
             else:
@@ -910,7 +947,7 @@ l - list midi devices
                             return True # processed, filter out
                     if MODWHEEL_TO_PITCH_FEATURE:
                         # mod wheel convert to differential pitch modulation
-                        # make it do what pitch wheel does, but wihtout dead middle spot
+                        # make it do what pitch wheel does, but without dead middle spot
                         diff_mod = m_b2 - self.last_modwheel
                         self.last_modwheel = m_b2
                         # pitch value see from -8192 to 8191
@@ -921,7 +958,6 @@ l - list midi devices
                         if self.verbose & 4:
                             print('made:')
                             print(ev)
-                        #fixed_ev = (13,0,0,253, (0,0), (28,0), (130,0), (0,0,0, 0,0, self.virtual_pitchval))
                         fixed_ev = (13,0,0,253, (0,0), (0,0), (0,0), (0,0,0, 0,0, self.virtual_pitchval))
                         ev = fixed_ev
                         if self.verbose & 4:
@@ -938,7 +974,8 @@ l - list midi devices
                     if self.verbose & 2:
                         desc = self.mDev.SummaryCC_Desc(m_b1, m_b2)
                         print('pass thru CC event:' + desc)
-                    self.mDev.WriteAlsaEvent(alsa_event)
+                    #self.mDev.WriteAlsaEvent(alsa_event)
+                    alsaseq.outlast((tx_ch | 0x10, 0,0,0)) # modify first(channel)
 
         elif (m_b0 & 0xf0) == 0x90:
             if self.verbose & 2:
@@ -974,18 +1011,16 @@ l - list midi devices
             if self.pass_thru:
                 if self.verbose & 2:
                     print('pass thru noteon')
-                #ev = alsamidi.noteonevent(tx_ch, m_b1, m_b2)
-                #alsa_event[7][0] = 0x80 | tx_ch
-                #self.mDev.WriteAlsaEvent(alsa_event)
-                self.mDev.Write([0x80 | tx_ch, m_b1, m_b2])
+                alsaseq.outlast((tx_ch | 0x10, 0,0,0)) # modify first(channel)
         else:
             if self.verbose & 1:
                 print('Unhandled event ch:%d Cmd:%d Vel:%d' % (rx_ch, m_b1, m_b2))
             if self.pass_thru:
                 if self.verbose & 2:
                     print('pass thru event')
-                self.mDev.WriteAlsaEvent(alsa_event)
+                #self.mDev.WriteAlsaEvent(alsa_event)
                 #self.mDev.Write([0x80 | tx_ch, m_b1, m_b2])
+                alsaseq.outlast((tx_ch | 0x10, 0,0,0)) # modify first(channel)
         return True # processed something
 
     #---------------------------------------------------
@@ -1041,6 +1076,8 @@ l - list midi devices
 def main():
     mo = Main()
     mo.ProcessArgs()
+
+    # an attempt at auto-starting Yoshimi, not a very good attempt..
     if mo.options.find('runyosh') >= 0:
         # yosh -c no cmdline, -C cmdline, -i no gui, -I gui.
         #   -S load state, -K auto connect to jack

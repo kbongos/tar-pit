@@ -11,7 +11,7 @@ lscp_pick.py - Act as console tool to load SFZ files into linuxsampler to
  quickly test/sample many SFZ sound sample files.
 
 Available currently in:
-  git clone http://kbongos/git/tar-pit
+  git clone https://githib.com/kbongos/tar-pit.git
 
 INSTALL
 

@@ -1,15 +1,20 @@
 # tar-pit
-My first repo on github, please ignore, move along folks.  Pay no attention to the man behind the curtain.
 
-The tar-pit is a sandbox to learn github, get my brain familiar with git again.
-Ugh, git.  I will be using this tar-pit mainly as a test bed.
+This is my sandbox with some python scripts.  I called it tar-pit
+for fun.  Once I get more comfortable with git, or get to the point
+where the contents are better defined, I may move these
+into something other than the tar-pit.
 
-The midrt dir is some proto code for midi routing.
-It includes a modified alsaseq lib.
+midrt/midiroute.py - Act as a midi router and console app interface to
+ yoshimi, or possibly useful to interface to other synth.  Prototype-ish
+ BETA script program.
 
-Mainly want to do a bunch of changes on some code I don't care much about
-to get familiar with git.  Ugh.
+midrt/lscp_pick.py - Act as console tool to load SFZ files into linuxsampler
+ to quickly test/sample many SFZ sound sample files.  Scan for sfz files and
+ make a list.
+
+This includes a modified alsaseq lib for midiroute.py, and a
+copy of lscp python lib for lscp_pick.py.
 
 kbongos
-
 

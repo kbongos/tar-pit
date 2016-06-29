@@ -1,0 +1,60 @@
+
+ABOUT
+
+This is a few python console apps.
+
+midiroute.py - Act as a midi router and console app interface to
+  yoshimi, or possibly useful to interface to other synth.  Prototype-ish
+  BETA script program.
+
+lscp_pick.py - Act as console tool to load SFZ files into linuxsampler to
+ quickly test/sample many SFZ sound sample files.
+
+Available currently in:
+  git clone http://kbongos/git/tar-pit
+
+INSTALL
+
+For midiroute/py you will need to compile and install the alsaseq lib included.
+cd alsaseq; python setup.py build; sudo python setup.py install
+alsaseq lib I find here: pp.com.mx/python/alsaseq
+Mine here has some modifications to help show/pick MIDI ins/outs and
+a few other things.
+then run inplace like:
+./midiroute.py  or try:
+python ./midiroute.py
+
+For lscp_pick.py it uses a copy of lscp python library in sub-dir included.
+Should just work assuming you have linuxsampler available.
+run inplace like:
+./lscp_pick.py  or try:
+python ./lscp_pick.py
+
+Use of lscp_pick.py - 
+
+This will allow generation of a list of sfz files, and quick loading
+based on numeric entry of sfz files into linuxsampler.  It is assumed
+linuxsampler is running(run it in some other window, or in background prior).
+Jack operation is assumed, so that should be running first.
+
+It may ask to create a midi input, and a JACK audio output if one is not
+setup yet in linuxsampler.  You need to connect these with something like
+qjackctl.  Then enter sfz_scan command, and enter a directory to recursively
+scan for .sfz files.  It will save this in a sfz_list.out file and load
+it on start.  It uses this as a sfz numbered file list.  Enter sfz_load
+command and it will prompt for the number of the sfz file to load.  It
+may be needed to load this sfz_list.out file in a text editor for a
+reference of the numbers and filenames.  It will continue to prompt for
+quick entry and cycling thru numerous sfz files to sample or test.
+It is assumed that an external keyboard is used to play/test the loaded
+sfz files.  Channel 1 midi is assumed and used.
+
+Some provision is made to embed a list of sfz files in the script if this
+is useful(it will be used if sfz_list.out does not exist).
+
+This lscp python lib is from(in development, so mine here maybe stale):
+  git clone http://chrisarndt.de/git/lscp.git
+
+--------------------------
+kbongosmusic at gmail_com - my code here licensed as GPLv2.
+

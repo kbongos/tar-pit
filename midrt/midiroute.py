@@ -4,7 +4,7 @@
 #  This is aimed at building midi routers for music control purposes.
 # My initial devices to use with include Yosihimi synth, m-audio keyboard
 #  controls.
-# kbongosmusic at gmail_com - GPLv2
+# kbongosmusic at gmail_com - licensed as GPLv2.
 #
 # reference- mididings has good web link to midi spec online.
 #   http://www.somascape.org/midi/tech/spec.html

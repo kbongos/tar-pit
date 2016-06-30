@@ -47,7 +47,31 @@ MODWHEEL_BANKPROG_KEY_FEATURE = True
 # Following will turn modwheel into differential pitch adjustment.
 # So do same as pitch wheel but without the dead-spot, and then auto
 # reset pitch back to zero on next key event.
-MODWHEEL_TO_PITCH_FEATURE = True
+# Not sure this is useful, but its another 'stateful' routing test..
+#  this is broken now, probably due to my midi tinkering..
+MODWHEEL_TO_PITCH_FEATURE = False
+
+# we have 8 knobs.  On my Oxygen or Radium. mapped to CC-70,71,..,77
+KNOB0_CC = 70 # CC
+KNOB1_CC = 71 # CC
+KNOB2_CC = 72 # CC
+KNOB3_CC = 73 # CC
+KNOB4_CC = 74 # CC
+KNOB5_CC = 75 # CC
+KNOB6_CC = 76 # CC
+KNOB7_CC = 77 # CC
+# Currently I have system effects setup as:
+#  0:reverb, 1:alienwah, 2:phaser, 3:echo.
+
+#  On Radium, have 8 extra sliders mapped to CC-80,81..
+SLIDER0_CC = 80
+SLIDER1_CC = 81
+SLIDER2_CC = 82
+SLIDER3_CC = 83
+SLIDER4_CC = 84
+SLIDER5_CC = 85
+SLIDER6_CC = 86
+SLIDER7_CC = 87
 
 #------------------------
 def runproc(exe_str):
@@ -367,8 +391,7 @@ class MidiDevice:
 
     #-------------------------------------------
     # Read a single alsa event, reconstruct to MIDI where approriate
-    def Read(self):
-
+    def JUNK_OLD_Read(self):
         # read the alsa event
         ev = alsaseq.input()
         (mtype, flags, tag, queue, m_time, src, dest, mdata) = ev
@@ -431,20 +454,16 @@ class MidiDevice:
         return None
 
     #-------------------------------------------
-    # Read a single alsa event, reconstruct to MIDI where approriate
     def ReadMidi(self):
-
+        ''' Read a single alsa event, reconstruct to MIDI where approriate
+            modified alsaseq input to just get info we need '''
         # read the alsa event
-        ev = alsaseq.inmidi()
+        ev = alsaseq.inmidi() # 
         (mtype, rx_ch, note_param, vel_ctrl) = ev
 
         if mtype == alsaseq.SND_SEQ_EVENT_SENSING: #42: # tick?  get about 3 per second
             return None # ignore for now, filter these out quitely.
 
-        #b0 = mdata[0] # 0, ch? mtype=6
-        #b1 = mdata[1] # note
-        #b2 = mdata[2] # velocity
-        #b3 = mdata[3] # 0
         if self.verbose & 4:
             print(mtype, rx_ch, note_param, vel_ctrl)
             # need to debug,understand, print it.
@@ -776,19 +795,18 @@ l - list midi devices
 
     #---------------------------------------------------
     # Router - Map incoming MidiMan knobs to Yoshi controls
-    # For starters, let's assume the keys are connected to Yoshi in parallel to us.
-    #  so we do not have to pass thru events.  We just capture them and send Yoshi
-    #  some altered events to control the things we want.  This may conflict with
-    #  any existing CC mappings done by Yoshimi, but we don't care now, this is just
-    #  the simplest thing to do.  You could filter out with mididings if you wanted.
-    # Currently I have system effects setup as: reverb, alienwah, phaser, echo.
+    #  Default operation is pass thru(series route), where we
+    #  capture the events and pass thru or change whatever we like between
+    #  hardware keybd-ctrl to pc-synth.  This may have disadvantage of added
+    #  latency compared to routing to both pc-synth and our router here.
+    #  So I had an option to disable pass-thru(assume we are routed in
+    #  parallel and just send additional useful cntrl to soft-synth.
+    #  Haven't used or tried that mode lately.
     #---------------------------------------------------
     def MidimanToYoshiRouter_Start(self):
-        print('start MidiMan to Yoshi Router(change pitchwheel high to exit)')
-        print('  This maps CC 0-7 - MidiMan knobs, to System and Insert Effect Levels')
-        if self.pass_thru:
-            print('  Acting as Pass Thru router, passing thru notes, etc')
-        else:
+        print('start MidiMan to Yoshi Router')
+        print('  This maps Knobs 0-7 - to System Effect Levels')
+        if not self.pass_thru:
             print('  Acting as Non-Pass thru device, no pass thru of notes, etc')
         self.MidimanToYoshiRouter_ShowMenuHelp()
 
@@ -853,41 +871,28 @@ l - list midi devices
             return False # no midi events, nothing processed
 
         #print('got a midi event!')
-        if 1:
-          pkt = self.mDev.ReadMidi() # read only 1 message at a time
-          if pkt == None:
+        pkt = self.mDev.ReadMidi() # read only 1 message at a time
+        if pkt == None:
             # ignore bogus(alsaseq giving 3 odd pkts per sec)
             return True # processed something
-          m_b0 = pkt[0] # rx_ch | midi_ctrl
-          m_b1 = pkt[1] # note or param
-          m_b2 = pkt[2] # velocity or value
-          #m_b3 = pkt[3]
-        else:
-          pkt = self.mDev.Read() # read only 1 message at a time
-          if pkt == None:
-            # ignore bogus(alsaseq giving 3 odd pkts per sec)
-            return True # processed something
-
-          #print('got a midi event!')
-          alsa_event = pkt[0]
-          #m_time = alsa_event[4]
-          m_b0 = pkt[1]
-          m_b1 = pkt[2]
-          m_b2 = pkt[3]
-          m_b3 = pkt[4]
+        m_b0 = pkt[0] # rx_ch | midi_ctrl
+        m_b1 = pkt[1] # note or param
+        m_b2 = pkt[2] # velocity or value
 
         rx_ch = m_b0 & 0xf        # The channel in lower first nibble
         tx_ch = self.mChannel # send channel, send on channel we select
 
         if (m_b0 & 0xf0) == 0xb0: # CC control message upper nibble
-            # we have 8 knobs.  On my Oxygen or Radium.
-            # I have them mapped to CC-70,71,..,77
-            #  On Radium, have 8 extra sliders mapped to CC-80,81..
-            #   third one does not work ;(
-            if m_b1 >= 70 and m_b1 < 74: # first 4 knobs CC-70 to CC-73
+
+            idxEffectKnob = -1
+            if m_b1 == KNOB0_CC: idxEffectKnob = 0
+            if m_b1 == KNOB1_CC: idxEffectKnob = 1
+            if m_b1 == KNOB2_CC: idxEffectKnob = 2
+            if m_b1 == KNOB3_CC: idxEffectKnob = 3
+            if idxEffectKnob > 0: # knob 0-3 change CC event?
                 # map them to the 4 yoshi system effects 0 level control
                 effect_num  = 4 # system effect(4=system, 8=insert)
-                effect_index = m_b1-70 # effect index
+                effect_index = idxEffectKnob # effect index
                 self.last_sys_effect = effect_index
                 if self.verbose & 1:
                     map_desc = 'system effect level(%d)= %d' % (effect_index+1, m_b2)
@@ -897,13 +902,13 @@ l - list midi devices
                                msb_effect_ctrl, cc_data)
                 if self.verbose & 1:
                     print('map CC %d %d to: ' % (m_b1, m_b2) + map_desc)
-            elif m_b1 == 74:
+            elif m_b1 == KNOB4_CC:
                 if self.verbose & 1:
                     map_desc = ' master PAN CC-10= %d' % (m_b2)
                 self.mDev.Write([0xb0 | tx_ch, 10, m_b2]) # route to CC-10 PAN(master)
                 if self.verbose & 1:
                     print('map CC-%d %d to PAN CC-10:' % (m_b1, m_b2) + map_desc)
-            elif m_b1 == 75:
+            elif m_b1 == KNOB5_CC:
                 # this one routes pan based on last first 4 knobs used.
                 # routes pan to that system effect.
                 effect_num  = 4 # system effect(4=system, 8=insert)
@@ -916,14 +921,14 @@ l - list midi devices
                                msb_effect_ctrl, cc_data)
                 if self.verbose & 1:
                     print('map CC %d %d to: ' % (m_b1, m_b2) + map_desc)
-            elif m_b1 == 76:
+            elif m_b1 == KNOB6_CC:
                 if self.verbose & 1:
                     map_desc = 'master Yoshi-Portamento CC-65= %d' % (m_b2)
                 # This is digital on/off, > 64 is on, less off
                 self.mDev.Write([0xb0 | tx_ch, 65, m_b2]) # route to CC-65 Yoshi portamento
                 if self.verbose & 1:
                     print('map CC-%d %d to: ' % (m_b1, m_b2) + map_desc)
-            elif m_b1 == 77:
+            elif m_b1 == KNOB7_CC:
                 # yoshi expression cc-11, seems like same as master volume?
                 #map_desc = 'master Yoshi-Expression CC-11= %d' % (m_b2)
                 #mOut.Write([0xb0 | tx_ch, 11, m_b2]) # route to CC-11 Yoshi portamento

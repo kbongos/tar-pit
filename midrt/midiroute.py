@@ -889,7 +889,7 @@ l - list midi devices
             if m_b1 == KNOB1_CC: idxEffectKnob = 1
             if m_b1 == KNOB2_CC: idxEffectKnob = 2
             if m_b1 == KNOB3_CC: idxEffectKnob = 3
-            if idxEffectKnob > 0: # knob 0-3 change CC event?
+            if idxEffectKnob >= 0: # knob 0-3 change CC event?
                 # map them to the 4 yoshi system effects 0 level control
                 effect_num  = 4 # system effect(4=system, 8=insert)
                 effect_index = idxEffectKnob # effect index
